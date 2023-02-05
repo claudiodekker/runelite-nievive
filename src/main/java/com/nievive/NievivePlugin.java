@@ -1,9 +1,9 @@
 package com.nievive;
 
 import net.runelite.api.Client;
+import net.runelite.api.GameState;
 import net.runelite.api.MessageNode;
 import net.runelite.api.Player;
-import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.*;
 import net.runelite.api.widgets.Widget;
 import net.runelite.api.widgets.WidgetID;
@@ -36,16 +36,11 @@ public class NievivePlugin extends Plugin {
         this.resetVarbit();
     }
 
-    protected void resetVarbit() {
-        if (!this.varbitReplaced) {
-            return;
+    @Subscribe
+    public void onGameStateChanged(GameStateChanged gameStateChanged) {
+        if (gameStateChanged.getGameState() == GameState.LOGIN_SCREEN) {
+            this.resetVarbit();
         }
-
-        clientThread.invokeLater(() -> {
-            client.setVarbit(STEVE_VARBIT_ID, this.realSteveVarbitValue);
-            this.realSteveVarbitValue = -1;
-            this.varbitReplaced = false;
-        });
     }
 
     @Subscribe
@@ -55,16 +50,11 @@ public class NievivePlugin extends Plugin {
             return;
         }
 
-        WorldPoint location = player.getWorldLocation();
-        if (location == null) {
-            return;
-        }
-
         if (this.realSteveVarbitValue == -1) {
             this.realSteveVarbitValue = client.getVarbitValue(STEVE_VARBIT_ID);
         }
 
-        if (!this.varbitReplaced) {
+        if (this.realSteveVarbitValue == 1 && !this.varbitReplaced) { // Only replace if Steve's around.
             this.varbitReplaced = true;
             clientThread.invokeLater(() -> client.setVarbit(STEVE_VARBIT_ID, 0));
         }
@@ -76,19 +66,38 @@ public class NievivePlugin extends Plugin {
             return;
         }
 
-        if (this.varbitReplaced && this.realSteveVarbitValue != -1 && varbitChanged.getValue() == this.realSteveVarbitValue) {
+        if (!this.varbitReplaced) {
+            this.realSteveVarbitValue = varbitChanged.getValue();
+            return;
+        }
+
+        if (varbitChanged.getValue() == this.realSteveVarbitValue) {
             this.varbitReplaced = false;
         }
     }
 
     @Subscribe
     public void onWidgetLoaded(WidgetLoaded event) {
+        if (!this.varbitReplaced) {
+            // Attempt to "reset" Steve's character model when talking to him directly.
+            // Does not always work, as some states of Steve/Nieve seem to be based off of an inaccessible variable.
+            Widget npcChatHead = client.getWidget(WidgetInfo.DIALOG_NPC_HEAD_MODEL);
+            if (npcChatHead != null && npcChatHead.getModelId() == 6797) {
+                npcChatHead.setModelId(6798);
+            }
+            return;
+        }
+
         // NPC Contact Spell Window
         if (event.getGroupId() == 75) {
             Widget steveHead = client.getWidget(75, 32);
             Widget steveLabel = client.getWidget(75, 33);
 
             clientThread.invokeLater(() -> {
+                if (steveHead == null || steveLabel == null) {
+                    return;
+                }
+
                 steveLabel.setText("Nieve");
                 steveHead.setModelId(16282);
             });
@@ -97,7 +106,21 @@ public class NievivePlugin extends Plugin {
         // When talking to Steve
         if (event.getGroupId() == WidgetID.DIALOG_NPC_GROUP_ID) {
             Widget npcChatName = client.getWidget(WidgetInfo.DIALOG_NPC_NAME);
-            clientThread.invokeLater(() -> npcChatName.setText("Nieve"));
+            Widget npcChatHead = client.getWidget(WidgetInfo.DIALOG_NPC_HEAD_MODEL);
+
+            clientThread.invokeLater(() -> {
+                if (npcChatHead == null || npcChatName == null) {
+                    return;
+                }
+
+                if (npcChatName.getText().equals("Steve")) {
+                    npcChatName.setText("Nieve");
+                }
+
+                if (npcChatHead.getModelId() == 6798) {
+                    npcChatHead.setModelId(6797);
+                }
+            });
         }
 
         // Nieve's Grave
@@ -117,6 +140,10 @@ public class NievivePlugin extends Plugin {
 
     @Subscribe
     public void onMenuEntryAdded(MenuEntryAdded menuEntryAdded) {
+        if (!this.varbitReplaced) {
+            return;
+        }
+
         // Hover entries (Spellbook, NPC contact item etc.)
         if (menuEntryAdded.getOption().equals("Steve")) {
             menuEntryAdded.getMenuEntry().setOption("Nieve");
@@ -125,6 +152,10 @@ public class NievivePlugin extends Plugin {
 
     @Subscribe
     protected void onChatMessage(ChatMessage event) {
+        if (!this.varbitReplaced) {
+            return;
+        }
+
         // When doing "Examine" on Nieve's grave.
         if (event.getMessage().equals("In memory of Nieve, she looks rich and dead.")) {
             final MessageNode messageNode = event.getMessageNode();
@@ -132,5 +163,25 @@ public class NievivePlugin extends Plugin {
 
             client.refreshChat();
         }
+
+        // When interacting with a Slayer monster off-task within the Slayer Cave.
+        if (event.getMessage().equals("Steve wants you to stick to your Slayer assignments.")) {
+            final MessageNode messageNode = event.getMessageNode();
+            messageNode.setRuneLiteFormatMessage("Nieve wants you to stick to your Slayer assignments.");
+
+            client.refreshChat();
+        }
+    }
+
+    protected void resetVarbit() {
+        if (!this.varbitReplaced) {
+            return;
+        }
+
+        clientThread.invokeLater(() -> {
+            client.setVarbit(STEVE_VARBIT_ID, this.realSteveVarbitValue);
+            this.realSteveVarbitValue = -1;
+            this.varbitReplaced = false;
+        });
     }
 }
